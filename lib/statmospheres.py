@@ -63,6 +63,12 @@ def better_integrator_wrapper(x_min,x_max,density,function,*args):
     y = function(x, *args)
     return better_integrator(x,y)
 
+def log_integrator_wrapper(x_min,x_max,density,function,*args):
+    points = round(density*(x_max-x_min))
+    x = 10**np.linspace(x_min,x_max,points)
+    y = function(x, *args)
+    return better_integrator(x,y)
+
 def Voigt(x, x0, y0, a, sigma, gamma):
     return y0 + a * np.real(wofz((x - x0 + 1j*gamma)/sigma/np.sqrt(2))) / sigma /np.sqrt(2*np.pi)
 
