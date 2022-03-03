@@ -57,6 +57,14 @@ def better_integrator(x,y):
     total = np.dot(dx,ave_y)
     return total 
 
+# A logspace integrator
+def log_integrator(x,y):
+    dlnx = np.diff(np.log(x))
+    xy = x*y
+    ave_xy = np.diff(xy)/2+xy[:-1]
+    total = np.dot(dlnx,ave_xy)
+    return total 
+
 def better_integrator_wrapper(x_min,x_max,density,function,*args):
     points = round(density*(x_max-x_min))
     x = np.linspace(x_min,x_max,points)
@@ -74,3 +82,14 @@ def Voigt(x, x0, y0, a, sigma, gamma):
 
 def ave(array):
     return (array[1:]+array[:-1])/2
+
+@u.quantity_input(T=u.K)
+def Partition(df,element, T):
+    if element=='H-' or element=='HII':
+        return 1
+    theta = 5040*u.K/T
+    row = df[df.Element==element]
+    thetas = list(df)[1:-1]
+    Us = [float(val) for val in list(row.reset_index(drop=True).iloc[0][1:-1])]
+    U_r = np.interp(theta,thetas,Us)
+    return U_r
