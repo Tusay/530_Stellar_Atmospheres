@@ -93,3 +93,118 @@ def Partition(df,element, T):
     Us = [float(val) for val in list(row.reset_index(drop=True).iloc[0][1:-1])]
     U_r = np.interp(theta,thetas,Us)
     return U_r
+
+# Saha Phi(T) function using ioniz.txt
+@u.quantity_input(T=u.K)
+def Phi(df, PartitionTable, element, ionization_level, T):
+    if element=='H-' or element=='HII':
+        X = 0.754
+    if element=='HII':
+        X = 0
+    else:
+        ionization_level = len(element.split('+'))
+        element=element.split('+')[0]
+        row = df[df.Element==element]
+        X = row[f'Ionization_Energy_{ionization_level}'].item()*u.eV
+    # k_B=const.k_B.cgs
+    # h=const.h.cgs
+    # m_e=const.m_e.cgs
+    # pi=np.pi
+    # Phi = (2*pi*m_e*k_B*T/h**2)**(3/2)*np.exp(-X/k_B/T)
+    theta = 5040*u.K/T
+    I = X/u.eV
+    Phi = 1.202*10**9*Partition(PartitionTable,element,T)*theta**(-5/2)*10**(-theta*I)
+    return Phi
+
+# Saha Phi(T) function using nist_ioniz.txt
+@u.quantity_input(T=u.K)
+def NIST_Phi(NIST_Table, PartitionTable, element, T):
+    if element=='H-' or element=='HII':
+        X = 0.754
+    if element=='HII':
+        X = 0
+    else:
+        df=NIST_Table
+        row = df[df.Element==element]
+        X = row['Ionization_Energy'].item()*u.eV
+    # k_B=const.k_B.cgs
+    # h=const.h.cgs
+    # m_e=const.m_e.cgs
+    # pi=np.pi
+    # Phi = (2*pi*m_e*k_B*T/h**2)**(3/2)*np.exp(-X/k_B/T)
+    theta = 5040*u.K/T
+    I = X/u.eV
+    Phi = 1.202*10**9*Partition(PartitionTable,element,T)*theta**(-5/2)*10**(-theta*I)
+    return Phi
+
+#Opacity Functions
+# Note: valid only between 2600 to 113900 Angstroms
+@u.quantity_input(T=u.K,lam=u.Angstrom)
+def Kappa_Hff_2e(P_e, T, lam):
+    theta = 5040*u.K/T
+    lam=lam/u.Angstrom
+    f0 = -2.2763 - 1.6850*np.log10(lam) + 0.76661*np.log10(lam)**2 - 0.053346*np.log10(lam)**3
+    f1 = 15.2827 - 9.2846*np.log10(lam) + 1.99381*np.log10(lam)**2 - 0.142631*np.log10(lam)**3
+    f2 = -197.789 + 190.266*np.log10(lam) - 67.9775*np.log10(lam)**2 + 10.6913*np.log10(lam)**3 - 0.625151*np.log10(lam)**4
+    Kappa = 10**-26*P_e*10**(f0+f1*np.log10(theta)+f2*np.log10(theta)**2)
+    return Kappa
+
+# Note: valid only between 2250 to 15000 Angstroms
+@u.quantity_input(T=u.K,lam=u.Angstrom)
+def Kappa_Hbf_2e(P_e, T, lam):
+    theta = 5040*u.K/T
+    a0=1.99654
+    a1=-1.18267*10**-5
+    a2=2.64243*10**-6
+    a3=-4.40524*10**-10
+    a4=3.23992*10**-14
+    a5=-1.39568*10**-18
+    a6=2.78701*10**-23
+    lam=lam/u.Angstrom
+    alpha_bf=(a0+a1*lam+a2*lam**2+a3*lam**3+a4*lam**4+a5*lam**5+a6*lam**6)*10**-18
+    Kappa = 4.158*10**-10*alpha_bf*P_e*theta**(5/2)*10**(0.754*theta)
+    Kappa[Kappa<0]=0
+    Kappa[np.where(Kappa==0)[0][0]:]=0
+    return Kappa
+
+@u.quantity_input(T=u.K,lam=u.Angstrom)
+def Kappa_Hff(P_e, T, lam):
+    theta = 5040*u.K/T
+    lam=lam/u.Angstrom
+    alpha_0=1.0449*10**-26
+    I=13.59843401
+    R=1.0968*10**-3
+    X_lam = 1.2398*10**4/lam
+    g_ff=1+0.3456/(lam*R)**(1/3)*(np.log10(np.exp(1))/(theta*X_lam)+0.5)
+    Kappa = alpha_0*lam**3*g_ff*np.log10(np.exp(1))/2/theta/I*10**(-theta*I)
+    return Kappa
+
+@u.quantity_input(T=u.K,lam=u.Angstrom)
+def Kappa_Hbf(P_e, T, lam):
+    theta = 5040*u.K/T
+    lam=lam/u.Angstrom
+    I=13.59843401
+    alpha_0=1.0449*10**-26
+    Kappa=0
+    R=1.0968*10**-3
+    for n in range(1,100):
+        g_bf = 1-0.3456/(lam*R)**(1/3)*(lam*R/n**2-0.5)
+        if n==1:
+            g_bf[lam>912]=0
+        if n==2:
+            g_bf[lam>3746]=0
+        if n==3:
+            g_bf[lam>8206]=0
+        if n==4:
+            g_bf[lam>14588]=0
+        X = I*(1-1/n**2)
+        Kappa += lam**3/n**3*g_bf*10**(-theta*X)
+    return Kappa*alpha_0
+
+@u.quantity_input(T=u.K,lam=u.Angstrom)
+def NIST_Kappa_Total(df, Partition_Table, P_e, T, lam):
+    Phi_val = (1+NIST_Phi(df,Partition_Table,'H',T)/P_e)
+    theta=5040*u.K/T
+    X_lam = 1.2398*10**4/(lam*(1/u.Angstrom))
+    Kappa = ((Kappa_Hbf(P_e, T, lam)+Kappa_Hff(P_e, T, lam)+Kappa_Hbf_2e(P_e, T, lam))*(1-10**(-X_lam*theta))+Kappa_Hff_2e(P_e, T, lam))/Phi_val/P_e
+    return Kappa
