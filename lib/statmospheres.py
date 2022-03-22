@@ -83,60 +83,6 @@ def Voigt(x, x0, y0, a, sigma, gamma):
 def ave(array):
     return (array[1:]+array[:-1])/2
 
-@u.quantity_input(T=u.K)
-def Partition(df,element, T):
-    if element=='H-' or element=='HII':
-        return 1
-    theta = 5040*u.K/T
-    row = df[df.Element==element]
-    thetas = list(df)[1:-1]
-    Us = [float(val) for val in list(row.reset_index(drop=True).iloc[0][1:-1])]
-    U_r = np.interp(theta,thetas,Us)
-    return U_r
-
-# Saha Phi(T) function using ioniz.txt
-@u.quantity_input(T=u.K)
-def Phi(df, PartitionTable, element, ionization_level, T):
-    if element=='H-' or element=='HII':
-        X = 0.754
-    if element=='HII':
-        X = 0
-    else:
-        ionization_level = len(element.split('+'))
-        element=element.split('+')[0]
-        row = df[df.Element==element]
-        X = row[f'Ionization_Energy_{ionization_level}'].item()*u.eV
-    # k_B=const.k_B.cgs
-    # h=const.h.cgs
-    # m_e=const.m_e.cgs
-    # pi=np.pi
-    # Phi = (2*pi*m_e*k_B*T/h**2)**(3/2)*np.exp(-X/k_B/T)
-    theta = 5040*u.K/T
-    I = X/u.eV
-    Phi = 1.202*10**9*Partition(PartitionTable,element,T)*theta**(-5/2)*10**(-theta*I)
-    return Phi
-
-# Saha Phi(T) function using nist_ioniz.txt
-@u.quantity_input(T=u.K)
-def NIST_Phi(NIST_Table, PartitionTable, element, T):
-    if element=='H-' or element=='HII':
-        X = 0.754
-    if element=='HII':
-        X = 0
-    else:
-        df=NIST_Table
-        row = df[df.Element==element]
-        X = row['Ionization_Energy'].item()*u.eV
-    # k_B=const.k_B.cgs
-    # h=const.h.cgs
-    # m_e=const.m_e.cgs
-    # pi=np.pi
-    # Phi = (2*pi*m_e*k_B*T/h**2)**(3/2)*np.exp(-X/k_B/T)
-    theta = 5040*u.K/T
-    I = X/u.eV
-    Phi = 1.202*10**9*Partition(PartitionTable,element,T)*theta**(-5/2)*10**(-theta*I)
-    return Phi
-
 #Opacity Functions
 # Note: valid only between 2600 to 113900 Angstroms
 @u.quantity_input(T=u.K,lam=u.Angstrom)
@@ -208,3 +154,90 @@ def NIST_Kappa_Total(df, Partition_Table, P_e, T, lam):
     X_lam = 1.2398*10**4/(lam*(1/u.Angstrom))
     Kappa = ((Kappa_Hbf(P_e, T, lam)+Kappa_Hff(P_e, T, lam)+Kappa_Hbf_2e(P_e, T, lam))*(1-10**(-X_lam*theta))+Kappa_Hff_2e(P_e, T, lam))/Phi_val/P_e
     return Kappa
+
+def A_sol(df,element):
+    row = df[df.element==element]
+    return row
+
+@u.quantity_input(T=u.K)
+def Partition(df,element, T):
+    # print(element)
+    if element=='H-' or element=='HII':
+        return 1
+    theta = 5040*u.K/T
+    row = df[df.Element==element]
+    thetas = list(df)[1:-1]
+    U_strs = [val for val in list(row.reset_index(drop=True).iloc[0][1:-1])]
+    nulls = []
+    for i,U in enumerate(U_strs):
+        if U == '-':
+            nulls.append(i)
+    for i in reversed(nulls):
+        del thetas[i]
+        del U_strs[i]
+    Us = [float(u) for u in U_strs]
+    U_r = np.interp(theta,thetas,Us)
+    return 10**U_r
+
+# Saha Phi(T) function using nist_ioniz.txt
+@u.quantity_input(T=u.K)
+def NIST_Phi(NIST_Table, PartitionTable, element, T):
+    # print(element)
+    if element=='H-':
+        X = 0.754*u.eV
+    elif element=='HII':
+        X = 0*u.eV
+    else:
+        df=NIST_Table
+        row = df[df.Element==element]
+        X = row['Ionization_Energy'].item()*u.eV
+    # k_B=const.k_B.cgs
+    # h=const.h.cgs
+    # m_e=const.m_e.cgs
+    # pi=np.pi
+    # Phi = (2*pi*m_e*k_B*T/h**2)**(3/2)*np.exp(-X/k_B/T)
+    theta = 5040*u.K/T
+    I = X/u.eV
+    element0 = element
+    if element=='H':
+        element1 = element+'II'
+    else:
+        element1 = element+'+'
+    if element == 'H-':
+        element0 = 'H-'
+        element1 = 'H'
+    Pfrac = Partition(PartitionTable,element1,T)/Partition(PartitionTable,element0,T)
+    Phi = 0.6665*5040**2.5*Pfrac*theta**(-5/2)*10**(-theta*I)
+    return Phi
+
+@u.quantity_input(T=u.K)
+def NIST_Solve_Pe(Pg,elements,ATable,NIST_Table,PartitionTable,T):
+    def Aj(j):
+        if j == 'H-':
+            j = 'H'
+        return A_sol(ATable,j).A.item()
+    if T.value > 30000:
+        Pe = Pg/2
+    else:
+        Pe = np.sqrt(Pg*NIST_Phi(NIST_Table,PartitionTable,'H',T))
+        # print(f'Initial Pe guess: {Pe}')
+    count = 0
+    Pei=0
+    Pef=Pe
+    while abs(Pef-Pei) > 1e-15:
+        Pei=Pef
+        num=0
+        denom=0
+        for j in elements:
+            frac=NIST_Phi(NIST_Table,PartitionTable,j,T)/Pei
+            num+=Aj(j)*frac/(1+frac)
+            denom+=Aj(j)*(1+frac/(1+frac))
+        Pef = Pg*num/denom
+        if count == 100:
+            print(f'Count exceeded. While loop broken.')
+            print(f'Pef: {Pef}\nPei: {Pei}')
+            break
+        count+=1
+    print(f'It took {count} iterations to calculate P_e')
+    return Pef
+
