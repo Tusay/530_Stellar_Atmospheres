@@ -110,7 +110,8 @@ def Kappa_Hbf_2e(P_e, T, lam):
     alpha_bf=(a0+a1*lam+a2*lam**2+a3*lam**3+a4*lam**4+a5*lam**5+a6*lam**6)*10**-18
     Kappa = 4.158*10**-10*alpha_bf*P_e*theta**(5/2)*10**(0.754*theta)
     Kappa[Kappa<0]=0
-    Kappa[np.where(Kappa==0)[0][0]:]=0
+    if np.where(Kappa==0)[0].size>0:
+        Kappa[np.where(Kappa==0)[0][0]:]=0
     return Kappa
 
 @u.quantity_input(T=u.K,lam=u.Angstrom)
@@ -233,7 +234,7 @@ def NIST_Solve_Pe(Pg,elements,ATable,NIST_Table,PartitionTable,T):
             num+=Aj(j)*frac/(1+frac)
             denom+=Aj(j)*(1+frac/(1+frac))
         Pef = Pg*num/denom
-        if count == 100:
+        if count == 50:
             print(f'Count exceeded. While loop broken.')
             print(f'Pef: {Pef}\nPei: {Pei}')
             break
@@ -241,3 +242,31 @@ def NIST_Solve_Pe(Pg,elements,ATable,NIST_Table,PartitionTable,T):
     print(f'It took {count} iterations to calculate P_e')
     return Pef
 
+def Kappa_e(P_g, P_e, sumAj):
+    alpha_e=0.6648*10**-24
+    Ke = alpha_e*P_e/(P_g - P_e)*sumAj
+    return Ke
+
+@u.quantity_input(T=u.K,lam=u.Angstrom)
+def Continuous_Opacity(T,P_e,P_g,lam,elements,ATable,NIST_Table,Partition_Table):
+    Phi_val = (1+NIST_Phi(NIST_Table,Partition_Table,'H',T)/P_e)
+    def Aj(j):
+        if j == 'H-':
+            j = 'H'
+        return A_sol(ATable,j).A.item()
+    def mu(j):
+        if j == 'H-':
+            j = 'H'
+        return A_sol(ATable, j).weight.item()
+    sumAj = sum([Aj(j) for j in elements])
+    m_p = const.m_p.cgs.value
+    sumAjmuj = sum([Aj(j)*mu(j)*m_p for j in elements])
+    theta=5040*u.K/T
+    X_lam = 1.2398*10**4/(lam*(1/u.Angstrom))
+    KHbfmin = Kappa_Hbf_2e(P_e,T,lam)*(1-10**(-theta*X_lam))
+    KHffmin = Kappa_Hff_2e(P_e,T,lam)
+    KHbf = Kappa_Hbf(P_e,T,lam)*(1-10**(-theta*X_lam))
+    KHff = Kappa_Hff(P_e,T,lam)*(1-10**(-theta*X_lam))
+    Ke = Kappa_e(P_g,P_e,sumAj)
+    Kcont = ((KHbfmin + KHffmin + KHbf + KHff)/Phi_val + Ke)/sumAjmuj
+    return Kcont,KHbfmin/sumAjmuj,KHffmin/sumAjmuj,KHbf/sumAjmuj,KHff/sumAjmuj,Ke/sumAjmuj
